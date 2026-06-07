@@ -60,7 +60,7 @@
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center bg-dark text-white p-3 rounded card mb-3">
         <div>
-            <h2 class="mb-0">Five Star Refrigeration Check System <span class="badge bg-success fs-6 align-middle ms-2">v1.3.15</span></h2>
+            <h2 class="mb-0">Five Star Refrigeration Check System <span class="badge bg-success fs-6 align-middle ms-2">v1.3.18</span></h2>
             <small>PWA + IndexedDB Draft Recovery + Corrective Actions + Lock Restore Fix</small>
         </div>
         <span class="badge bg-primary fs-6" id="liveClock"></span>
@@ -120,9 +120,12 @@
     <div class="row">
         <div class="col-12 col-lg-7">
             <div class="card p-4 shadow-sm border-primary" style="border-width: 2px;">
-                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3 flex-wrap gap-2">
                     <h4 class="text-secondary mb-0">📝 Digital Floor Log Sheet</h4>
-                    <button type="button" id="kioskSessionBtn" onclick="toggleKioskFormInterlock()" class="btn btn-success fw-bold px-4 shadow-sm">🟢 Start New Inspection Route</button>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="button" id="forceDraftSyncBtn" onclick="forceSyncDraftFromSheetOnly()" class="btn btn-outline-primary fw-bold px-3 shadow-sm">🔄 Restore Draft From Sheet</button>
+                        <button type="button" id="kioskSessionBtn" onclick="toggleKioskFormInterlock()" class="btn btn-success fw-bold px-4 shadow-sm">🟢 Start New Inspection Route</button>
+                    </div>
                 </div>
 
                 <form id="masterForm" class="form-locked-state" novalidate>
@@ -180,6 +183,7 @@
 <script>
     const cloudSpreadsheetURL = "https://script.google.com/macros/s/AKfycbyK8vuojeFXmyDolMV_bm4C4JP94wXlhq87TtSt0a3vQgwk1hew1c2RV8U26o91vYLI/exec";
     const draftStorageKey = "five_star_active_draft_session";
+    const draftBackupStorageKey = "five_star_active_draft_session_backup";
     const activeSessionKey = "five_star_route_active";
     const indexedDbName = "five_star_refrigeration_pwa";
     const indexedDbStoreName = "drafts";
@@ -392,6 +396,37 @@
         saveDraftProgressData();
     }
 
+
+
+    function countFilledTemperaturesInDraft(draft) {
+        if (!draft || !draft.temperatures) return 0;
+        return Object.values(draft.temperatures).filter(value => String(value || "").trim() !== "").length;
+    }
+
+    function getBestLocalDraftObject() {
+        let primary = null;
+        let backup = null;
+
+        try {
+            const rawPrimary = localStorage.getItem(draftStorageKey);
+            if (rawPrimary) primary = JSON.parse(rawPrimary);
+        } catch (err) {
+            console.log("Primary draft parse failed.", err);
+        }
+
+        try {
+            const rawBackup = localStorage.getItem(draftBackupStorageKey);
+            if (rawBackup) backup = JSON.parse(rawBackup);
+        } catch (err) {
+            console.log("Backup draft parse failed.", err);
+        }
+
+        if (!primary) return backup;
+        if (!backup) return primary;
+
+        return countFilledTemperaturesInDraft(backup) > countFilledTemperaturesInDraft(primary) ? backup : primary;
+    }
+
     function saveDraftProgressData() {
         const initialsNode = document.getElementById('initials');
         const shiftNode = document.getElementById('shift');
@@ -412,7 +447,22 @@
             draft.temperatures[input.getAttribute('data-name')] = input.value;
         });
 
-        localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+        const existingBestDraft = getBestLocalDraftObject();
+        const existingFilledCount = countFilledTemperaturesInDraft(existingBestDraft);
+        const newFilledCount = countFilledTemperaturesInDraft(draft);
+
+        // Critical iPad-lock protection:
+        // During a true iOS reload, the page can briefly run before the Config-driven
+        // temperature fields are rebuilt. Do not let that empty/partial snapshot erase
+        // a better draft that already exists.
+        if (existingFilledCount > 0 && newFilledCount < existingFilledCount) {
+            console.log("Skipped weaker draft save to protect active inspection recovery.", { existingFilledCount, newFilledCount });
+            return;
+        }
+
+        const draftJson = JSON.stringify(draft);
+        localStorage.setItem(draftStorageKey, draftJson);
+        localStorage.setItem(draftBackupStorageKey, draftJson);
         localStorage.setItem(activeSessionKey, "true");
         saveDraftToIndexedDB(draft);
     }
@@ -452,13 +502,13 @@
     }
 
     function loadSavedDraftProgressData() {
-        let rawDraft = localStorage.getItem(draftStorageKey);
-        if (!rawDraft) return;
-
-        let draft;
+        const draft = getBestLocalDraftObject();
+        if (!draft) return;
 
         try {
-            draft = JSON.parse(rawDraft);
+            const draftJson = JSON.stringify(draft);
+            localStorage.setItem(draftStorageKey, draftJson);
+            localStorage.setItem(draftBackupStorageKey, draftJson);
         } catch (err) {
             console.error("Saved draft was corrupted and could not be restored.", err);
             return;
@@ -513,6 +563,7 @@
 
     function clearSavedRouteSession() {
         localStorage.removeItem(draftStorageKey);
+        localStorage.removeItem(draftBackupStorageKey);
         localStorage.removeItem(activeSessionKey);
         clearIndexedDBDraft();
     }
@@ -588,14 +639,17 @@
 
             const cloudDraft = data.draft;
 
-            localStorage.setItem(draftStorageKey, JSON.stringify({
+            const restoredCloudDraft = {
                 savedAt: new Date().toISOString(),
                 initials: cloudDraft.initials || "",
                 shift: cloudDraft.shift || "",
                 freehandNotes: cloudDraft.freehandNotes || "",
                 temperatures: cloudDraft.temperatures || {},
                 checkboxes: {}
-            }));
+            };
+            const restoredCloudJson = JSON.stringify(restoredCloudDraft);
+            localStorage.setItem(draftStorageKey, restoredCloudJson);
+            localStorage.setItem(draftBackupStorageKey, restoredCloudJson);
 
             localStorage.setItem(activeSessionKey, "true");
             isInspectionActive = true;
@@ -606,6 +660,59 @@
             console.log("No Config draft restored.");
             return false;
         });
+    }
+
+    function forceSyncDraftFromSheetOnly() {
+        const btn = document.getElementById('forceDraftSyncBtn');
+        const originalText = btn ? btn.innerText : "";
+
+        if (btn) {
+            btn.disabled = true;
+            btn.innerText = "🔄 Restoring Draft...";
+        }
+
+        // This intentionally restores ONLY the form draft. It does not update
+        // the dashboard, history viewer, or latest-record display.
+        fetchStorePackageFresh()
+            .then(res => {
+                if (res.status !== "success") {
+                    throw new Error(res.message || "Could not load Config layout.");
+                }
+
+                activeStructuralMap = res.structural_schema || activeStructuralMap;
+
+                if (res.display_order_map) rawCloudSequenceMap = res.display_order_map;
+                else if (res.sequence_map) rawCloudSequenceMap = res.sequence_map;
+                else if (res.walkway_sequence_map) rawCloudSequenceMap = res.walkway_sequence_map;
+
+                const dynamicFieldsAlreadyExist = document.querySelectorAll('input[data-sec]').length > 0;
+                if (!dynamicFieldsAlreadyExist) {
+                    renderDynamicFormElements(res.structural_schema);
+                }
+
+                return loadDraftFromCloud();
+            })
+            .then(found => {
+                if (!found) {
+                    alert("No active draft was found in the Config sheet for this iPad.");
+                    return;
+                }
+
+                forceReadyEntryStateUntilSubmit();
+                loadSavedDraftProgressData();
+                renderCorrectiveActionPanels();
+                alert("Draft restored from Google Sheet.");
+            })
+            .catch(err => {
+                console.log("Manual draft restore failed:", err);
+                alert("Draft restore failed. Check WiFi, Apps Script deployment, and Config draft columns.");
+            })
+            .finally(() => {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = originalText || "🔄 Restore Draft From Sheet";
+                }
+            });
     }
 
     function clearCloudDraft() {
@@ -751,14 +858,21 @@
                     // then restore the draft into those fields. During normal active entry, this
                     // prevents repeated re-rendering from wiping visible values.
                     const dynamicFieldsAlreadyExist = document.querySelectorAll('input[data-sec]').length > 0;
+                    const activeRouteShouldRestore = localStorage.getItem(activeSessionKey) === "true";
                     if (!dynamicFieldsAlreadyExist) {
                         renderDynamicFormElements(res.structural_schema);
+
+                        // Restore immediately after the Config-driven inputs are created.
+                        // This is the key fix for iPad lock/unlock reloads.
+                        if (activeRouteShouldRestore && getBestLocalDraftObject()) {
+                            loadSavedDraftProgressData();
+                        }
                     }
 
                     if (res.historical_ledger_packages) localCacheHistory = res.historical_ledger_packages;
                     if (res.current_status) activeDashboardMemoryCache = res.current_status;
 
-                    if (localStorage.getItem(activeSessionKey) === "true") {
+                    if (activeRouteShouldRestore) {
                         forceReadyEntryStateUntilSubmit();
 
                         if (localStorage.getItem(draftStorageKey)) {
@@ -1444,7 +1558,11 @@
 
                 setTimeout(function() {
                     const fieldsAlreadyBuilt = document.querySelectorAll('input[data-sec]').length > 0;
-                    if (fieldsAlreadyBuilt && localStorage.getItem(draftStorageKey)) {
+                    if (!fieldsAlreadyBuilt) {
+                        pullSystemStructure();
+                        return;
+                    }
+                    if (getBestLocalDraftObject()) {
                         loadSavedDraftProgressData();
                     }
                 }, 500);
