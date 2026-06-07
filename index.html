@@ -60,8 +60,8 @@
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center bg-dark text-white p-3 rounded card mb-3">
         <div>
-            <h2 class="mb-0">Five Star Refrigeration Check System <span class="badge bg-success fs-6 align-middle ms-2">v1.3.9</span></h2>
-            <small>PWA + IndexedDB Draft Recovery + Corrective Actions Build</small>
+            <h2 class="mb-0">Five Star Refrigeration Check System <span class="badge bg-success fs-6 align-middle ms-2">v1.3.15</span></h2>
+            <small>PWA + IndexedDB Draft Recovery + Corrective Actions + Lock Restore Fix</small>
         </div>
         <span class="badge bg-primary fs-6" id="liveClock"></span>
     </div>
@@ -75,7 +75,7 @@
                     <button type="button" class="btn btn-outline-primary btn-sm history-nav-btn" id="navLiveBtn" onclick="jumpToLiveStream()">Live</button>
                     <button type="button" class="btn btn-outline-secondary btn-sm history-nav-btn" id="navNextBtn" onclick="navigateHistory(1)">Forward ▶</button>
                 </div>
-                <span id="dashboardModeIndicator" class="badge bg-success live-indicator">● Real-Time Cloud</span>
+                <span id="dashboardModeIndicator" class="badge bg-success live-indicator">● Latest Record</span>
             </div>
             <div class="text-end" style="max-width: 50%;">
                 <span class="text-muted d-block small mb-0 fw-semibold" id="latestLogMeta">Fetching entries...</span>
@@ -184,6 +184,22 @@
     const indexedDbName = "five_star_refrigeration_pwa";
     const indexedDbStoreName = "drafts";
     const indexedDbDraftKey = "active_route_draft";
+
+
+    function getFreshCloudReadURL() {
+        const separator = cloudSpreadsheetURL.includes("?") ? "&" : "?";
+        return cloudSpreadsheetURL + separator + "cache_bust=" + Date.now();
+    }
+
+    function fetchStorePackageFresh() {
+        // Keep this as a simple GET request. Do not add custom headers here;
+        // Google Apps Script web apps can fail CORS preflight checks when
+        // custom request headers such as Cache-Control are sent from GitHub Pages/PWA.
+        return fetch(getFreshCloudReadURL(), {
+            method: "GET",
+            cache: "no-store"
+        }).then(res => res.json());
+    }
 
     function openDraftDatabase() {
         return new Promise((resolve, reject) => {
@@ -297,6 +313,7 @@
     let clientObservedCond = "Clear Sky";
     let activeDashboardMemoryCache = {};
     let absoluteLastSyncTimestampMemory = Date.now();
+    let restoringDraft = false;
 
     function updateLiveClockAndWeather() {
         const now = new Date();
@@ -345,8 +362,14 @@
         }
 
         renderCorrectiveActionPanels();
-        forceSaveDraftNow();
-        lockSubmissionOnChanges();
+
+        // During draft restoration, do not immediately re-save or re-lock the form.
+        // This prevents an iPad lock/unlock reload from overwriting a valid draft
+        // while the dynamic Config-driven fields are still being rebuilt.
+        if (!restoringDraft) {
+            forceSaveDraftNow();
+            lockSubmissionOnChanges();
+        }
     }
 
     function lockSubmissionOnChanges() {
@@ -441,28 +464,35 @@
             return;
         }
 
-        isInspectionActive = true;
-        localStorage.setItem(activeSessionKey, "true");
-        clearInterval(backgroundRefreshPollerId);
+        restoringDraft = true;
 
-        document.getElementById('initials').value = draft.initials || "";
-        document.getElementById('shift').value = draft.shift || "";
-        document.getElementById('freehandNotes').value = draft.freehandNotes || "";
-        runtimeCheckboxStateMemory = draft.checkboxes || {};
+        try {
+            isInspectionActive = true;
+            localStorage.setItem(activeSessionKey, "true");
+            clearInterval(backgroundRefreshPollerId);
 
-        document.querySelectorAll('input[data-sec]').forEach(input => {
-            let name = input.getAttribute('data-name');
-            if (draft.temperatures && draft.temperatures[name] !== undefined) {
-                input.value = draft.temperatures[name];
-                evaluateFieldStyle(input, input.getAttribute('data-sec'));
-            }
-        });
+            document.getElementById('initials').value = draft.initials || "";
+            document.getElementById('shift').value = draft.shift || "";
+            document.getElementById('freehandNotes').value = draft.freehandNotes || "";
+            runtimeCheckboxStateMemory = draft.checkboxes || {};
 
-        document.getElementById('masterForm').classList.remove('form-locked-state');
+            document.querySelectorAll('input[data-sec]').forEach(input => {
+                let name = input.getAttribute('data-name');
+                if (draft.temperatures && draft.temperatures[name] !== undefined) {
+                    input.value = draft.temperatures[name];
+                    evaluateFieldStyle(input, input.getAttribute('data-sec'));
+                }
+            });
 
-        const sessionBtn = document.getElementById('kioskSessionBtn');
-        sessionBtn.innerText = "🛑 Cancel & Reset Route";
-        sessionBtn.className = "btn btn-danger fw-bold px-4 shadow-sm";
+            renderCorrectiveActionPanels();
+            document.getElementById('masterForm').classList.remove('form-locked-state');
+
+            const sessionBtn = document.getElementById('kioskSessionBtn');
+            sessionBtn.innerText = "🛑 Cancel & Reset Route";
+            sessionBtn.className = "btn btn-danger fw-bold px-4 shadow-sm";
+        } finally {
+            restoringDraft = false;
+        }
     }
 
     function forceReadyEntryStateUntilSubmit() {
@@ -605,8 +635,7 @@
             sessionBtn.innerText = "⏳ Syncing Store Database Layout...";
             sessionBtn.className = "btn btn-secondary fw-bold px-4 shadow-sm";
 
-            fetch(cloudSpreadsheetURL)
-                .then(res => res.json())
+            fetchStorePackageFresh()
                 .then(res => {
                     if (res.status === "success") {
                         activeStructuralMap = res.structural_schema;
@@ -652,7 +681,21 @@
         sessionBtn.className = "btn btn-success fw-bold px-4 shadow-sm";
 
         lockSubmissionOnChanges();
+
+        // Force the dashboard back to Live mode and refresh it from a fresh, non-cached
+        // Apps Script GET after a successful submit/reset. This prevents the dashboard
+        // from staying on an older historical report or cached response.
+        currentViewerIndex = -1;
+        const modeInd = document.getElementById('dashboardModeIndicator');
+        if (modeInd) {
+            modeInd.innerText = "● Latest Record";
+            modeInd.className = "badge bg-success live-indicator";
+        }
+
+        absoluteLastSyncTimestampMemory = 0;
         pullSystemStructure();
+        setTimeout(pullSystemStructure, 1500);
+        setTimeout(pullSystemStructure, 5000);
 
         absoluteLastSyncTimestampMemory = Date.now();
         startAutomaticDashboardPolling();
@@ -663,10 +706,10 @@
 
         backgroundRefreshPollerId = setInterval(() => {
             const rightNow = Date.now();
-            const fifteenMinutesInMilliseconds = 15 * 60 * 1000;
+            const dashboardRefreshIntervalMilliseconds = 60 * 1000;
 
             if (!isInspectionActive && currentViewerIndex === -1) {
-                if (rightNow - absoluteLastSyncTimestampMemory >= fifteenMinutesInMilliseconds) {
+                if (rightNow - absoluteLastSyncTimestampMemory >= dashboardRefreshIntervalMilliseconds) {
                     absoluteLastSyncTimestampMemory = rightNow;
                     pullSystemStructure();
                 }
@@ -674,9 +717,24 @@
         }, 30000);
     }
 
+    function showLatestRecordDashboard(packageData) {
+        const modeInd = document.getElementById('dashboardModeIndicator');
+        if (modeInd) {
+            modeInd.innerText = "● Latest Record";
+            modeInd.className = "badge bg-success live-indicator";
+        }
+
+        if (packageData.historical_ledger_packages && packageData.historical_ledger_packages.length > 0) {
+            const latestRecord = packageData.historical_ledger_packages[0];
+            processDashboardViewUpdate(latestRecord.status_map, true, latestRecord.meta_string);
+            return;
+        }
+
+        processDashboardViewUpdate(packageData.current_status || {}, true, packageData.meta_last_log || "No Records Logged");
+    }
+
     function pullSystemStructure() {
-        fetch(cloudSpreadsheetURL)
-            .then(res => res.json())
+        fetchStorePackageFresh()
             .then(res => {
                 if (res.status === "success") {
                     activeStructuralMap = res.structural_schema;
@@ -686,9 +744,14 @@
                     else if (res.walkway_sequence_map) rawCloudSequenceMap = res.walkway_sequence_map;
                     else rawCloudSequenceMap = {};
 
-                    // Do not rebuild dynamic temperature fields while an inspection route is active.
-                    // Rebuilding during entry can make the form appear to reset after an iPad lock/unlock or refresh.
-                    if (!isInspectionActive) {
+                    // Build the dynamic temperature fields only if they do not already exist.
+                    // This fixes iPad lock/unlock reload recovery: after a true reload, JavaScript
+                    // memory starts fresh, but localStorage/IndexedDB may restore activeSessionKey
+                    // before the Config-driven inputs have been recreated. We must build them once,
+                    // then restore the draft into those fields. During normal active entry, this
+                    // prevents repeated re-rendering from wiping visible values.
+                    const dynamicFieldsAlreadyExist = document.querySelectorAll('input[data-sec]').length > 0;
+                    if (!dynamicFieldsAlreadyExist) {
                         renderDynamicFormElements(res.structural_schema);
                     }
 
@@ -707,8 +770,15 @@
                     }
 
                     if (currentViewerIndex === -1) {
-                        processDashboardViewUpdate(res.current_status, true, res.meta_last_log);
+                        showLatestRecordDashboard(res);
                     }
+                }
+            })
+            .catch(err => {
+                console.log("Dashboard/config load failed:", err);
+                const dash = document.getElementById('fullWidthStatusDashboard');
+                if (dash) {
+                    dash.innerHTML = '<div class="alert alert-danger">Dashboard could not load. Check Apps Script URL, deployment permissions, or network connection.</div>';
                 }
             });
     }
@@ -1127,8 +1197,10 @@
         currentViewerIndex = -1;
 
         const modeInd = document.getElementById('dashboardModeIndicator');
-        modeInd.innerText = "● Real-Time Cloud";
-        modeInd.className = "badge bg-success live-indicator";
+        if (modeInd) {
+            modeInd.innerText = "● Latest Record";
+            modeInd.className = "badge bg-success live-indicator";
+        }
 
         pullSystemStructure();
     }
@@ -1136,7 +1208,7 @@
     function processDashboardViewUpdate(statusMap, isLiveCloudData, metaString) {
         if (!statusMap) statusMap = {};
 
-        let prefixText = isLiveCloudData ? "Last Logged: " : "Viewing Past Report: ";
+        let prefixText = isLiveCloudData ? "Latest Record: " : "Viewing Past Report: ";
         document.getElementById('latestLogMeta').innerText = `${prefixText}${metaString || "N/A"}`;
 
         let extractedNotes = "None Logged";
@@ -1273,6 +1345,9 @@
                 throw new Error(data.message || "Spreadsheet did not confirm successful submission.");
             }
 
+            currentViewerIndex = -1;
+            absoluteLastSyncTimestampMemory = 0;
+
             clearCloudDraft().finally(() => {
                 alert("🚀 Log secure-synced to spreadsheet records!");
                 clearSavedRouteSession();
@@ -1361,6 +1436,22 @@
 
 
 
+
+    function attachPageShowRecoveryHandler() {
+        window.addEventListener("pageshow", function(event) {
+            if (localStorage.getItem(activeSessionKey) === "true") {
+                forceReadyEntryStateUntilSubmit();
+
+                setTimeout(function() {
+                    const fieldsAlreadyBuilt = document.querySelectorAll('input[data-sec]').length > 0;
+                    if (fieldsAlreadyBuilt && localStorage.getItem(draftStorageKey)) {
+                        loadSavedDraftProgressData();
+                    }
+                }, 500);
+            }
+        });
+    }
+
     function registerServiceWorker() {
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("service-worker.js")
@@ -1374,6 +1465,7 @@
 
         registerServiceWorker();
         attachIPadDraftProtectionHandlers();
+        attachPageShowRecoveryHandler();
         await restoreIndexedDraftToLocalStorageIfNeeded();
         forceReadyEntryStateUntilSubmit();
 
