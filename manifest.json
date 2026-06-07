@@ -1,0 +1,15 @@
+{
+  "name": "Five Star Refrigeration Check System",
+  "short_name": "Five Star Temps",
+  "description": "Five Star refrigeration inspection form with local and cloud draft recovery.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f4f6f9",
+  "theme_color": "#198754",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

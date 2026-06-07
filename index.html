@@ -1,0 +1,1252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Five Star Refrigeration Check System</title>
+    <meta name="theme-color" content="#198754">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Five Star Temps">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #f4f6f9; font-family: system-ui, -apple-system, sans-serif; }
+        .card { border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .status-green { background-color: #d1e7dd !important; color: #0f5132 !important; }
+        .status-yellow { background-color: #fff3cd !important; color: #664d03 !important; }
+        .status-red { background-color: #f8d7da !important; color: #842029 !important; font-weight: bold !important; }
+        .field-error { border: 2px dashed #dc3545 !important; background-color: #fff5f5 !important; }
+        .status-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+        .dot-red { background-color: #dc3545; box-shadow: 0 0 6px #dc3545; }
+        .dot-yellow { background-color: #ffc107; box-shadow: 0 0 6px #ffc107; }
+        .dot-green { background-color: #198754; box-shadow: 0 0 6px #198754; }
+        .dot-gray { background-color: #6c757d; }
+        .section-block { border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; margin-bottom: 15px; background: white; scroll-margin-top: 80px; }
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+        .dashboard-badge { display: flex; flex-direction: column; padding: 10px; background: #fff; border: 1px solid #dee2e6; border-radius: 4px; font-size: 12px; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; -webkit-tap-highlight-color: transparent; }
+        .dashboard-badge:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1) !important; border-color: #0d6efd; }
+        .dashboard-badge.badge-danger-alert { border: 2px solid #dc3545; background-color: #fff8f8; }
+        .dashboard-badge.badge-warning-alert { border: 2px solid #ffc107; background-color: #fffff2; }
+        .badge-action-text { font-size: 10px; font-style: italic; margin-top: 4px; border-top: 1px dashed #dee2e6; padding-top: 4px; }
+        .text-red-alert { color: #b02a37; }
+        .text-yellow-alert { color: #664d03; }
+        .custom-yellow-notes-badge { background-color: #ffc107 !important; color: #000000 !important; font-weight: 700 !important; border: 2px solid #000000 !important; }
+        .history-nav-btn { padding: 2px 10px; font-size: 13px; font-weight: bold; border-radius: 4px; }
+        .live-indicator { font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+        .form-locked-state { opacity: 0.4; pointer-events: none; }
+        .alert-item-container { scroll-margin-top: 80px; padding: 6px; border-radius: 4px; transition: background-color 0.3s; }
+        .weather-meta-text { font-size: 11px; font-weight: bold; color: #0d6efd; display: block; margin-top: 2px; }
+        .active-walkway-focus { background-color: #e6f2ff !important; border: 2px solid #0d6efd !important; border-radius: 6px; transform: scale(1.01); transition: all 0.2s ease-in-out; }
+        .full-screen-fluid-dialog { max-width: 96% !important; margin: 2% auto !important; }
+        .fluid-canvas-viewport { position: relative; height: 55vh !important; width: 100% !important; }
+
+        @media (max-width: 1024px) {
+            .section-block h5 { font-size: 1.45rem !important; margin-bottom: 1rem !important; }
+            .alert-item-container label { font-size: 14px !important; font-weight: 700 !important; color: #111111 !important; }
+            .walkway-input-node { font-size: 22px !important; height: 52px !important; font-weight: bold !important; }
+            .dashboard-badge { font-size: 14px !important; padding: 14px !important; }
+            .dashboard-badge .fw-bold { font-size: 17px !important; }
+            .form-label, #freehandNotes, .form-control { font-size: 1.2rem !important; }
+            .form-check-label { font-size: 13px !important; font-weight: 600 !important; padding-left: 6px; }
+            .form-check-input { width: 1.4em !important; height: 1.4em !important; margin-top: 0.15em !important; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center bg-dark text-white p-3 rounded card mb-3">
+        <div>
+            <h2 class="mb-0">Five Star Refrigeration Check System <span class="badge bg-success fs-6 align-middle ms-2">v1.3.6</span></h2>
+            <small>PWA + IndexedDB Draft Recovery Build</small>
+        </div>
+        <span class="badge bg-primary fs-6" id="liveClock"></span>
+    </div>
+
+    <div class="card p-4 mb-4">
+        <div class="d-flex justify-content-between align-items-baseline border-bottom pb-2 mb-3">
+            <div class="d-flex align-items-center gap-3">
+                <h4 class="text-secondary mb-0">🚨 System Status Dashboard</h4>
+                <div class="btn-group shadow-sm" role="group">
+                    <button type="button" class="btn btn-outline-secondary btn-sm history-nav-btn" id="navPrevBtn" onclick="navigateHistory(-1)">◀ Back</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm history-nav-btn" id="navLiveBtn" onclick="jumpToLiveStream()">Live</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm history-nav-btn" id="navNextBtn" onclick="navigateHistory(1)">Forward ▶</button>
+                </div>
+                <span id="dashboardModeIndicator" class="badge bg-success live-indicator">● Real-Time Cloud</span>
+            </div>
+            <div class="text-end" style="max-width: 50%;">
+                <span class="text-muted d-block small mb-0 fw-semibold" id="latestLogMeta">Fetching entries...</span>
+                <span class="weather-meta-text" id="dashboardWeatherView">Weather Knox (46534): Syncing...</span>
+                <span class="badge custom-yellow-notes-badge text-wrap text-start fs-6 mt-2" style="display: inline-block; word-break: break-word;" id="dashboardNotesView">Notes: None Logged</span>
+            </div>
+        </div>
+        <div class="dashboard-grid" id="fullWidthStatusDashboard">Loading active floor metrics configuration...</div>
+    </div>
+
+    <div class="card p-3 mb-4 bg-light border-warning">
+        <h5 class="text-dark fw-bold mb-2">⚙️ Manager Asset Governance Console</h5>
+        <div class="row g-2">
+            <div class="col-md-3">
+                <select id="mgmtSection" class="form-select form-select-sm">
+                    <option value="sec1">🥛 1. Dairy / Refrigerated Cases</option>
+                    <option value="sec2">🍦 2. Ice Cream Cases</option>
+                    <option value="sec3">📦 3. Frozen Prepared Cases</option>
+                    <option value="sec4">🥩 4. Fresh Meat Cases</option>
+                    <option value="sec5">🥪 5. Deli Lunchmeat Cases</option>
+                    <option value="sec6">🍎 6. Fresh Produce Cases</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <input type="text" id="mgmtCoolerName" class="form-control form-control-sm" placeholder="Cooler Name">
+            </div>
+            <div class="col-md-2">
+                <input type="number" id="mgmtPlacementOrder" class="form-control form-control-sm" placeholder="Line Rank" min="1">
+            </div>
+            <div class="col-md-2">
+                <input type="password" id="mgmtAuthCode" class="form-control form-control-sm" placeholder="Manager PIN">
+            </div>
+            <div class="col-md-1">
+                <button type="button" class="btn btn-success btn-sm w-100 fw-bold" onclick="modifyAssetRegistry('REGISTER_NEW_COOLER')">➕ Add</button>
+            </div>
+            <div class="col-md-1">
+                <button type="button" class="btn btn-danger btn-sm w-100 fw-bold" onclick="modifyAssetRegistry('PURGE_EXISTING_COOLER')">🗑️ Drop</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12 col-lg-7">
+            <div class="card p-4 shadow-sm border-primary" style="border-width: 2px;">
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                    <h4 class="text-secondary mb-0">📝 Digital Floor Log Sheet</h4>
+                    <button type="button" id="kioskSessionBtn" onclick="toggleKioskFormInterlock()" class="btn btn-success fw-bold px-4 shadow-sm">🟢 Start New Inspection Route</button>
+                </div>
+
+                <form id="masterForm" class="form-locked-state" novalidate>
+                    <div class="row mb-4 bg-light p-3 rounded border">
+                        <div class="col-6">
+                            <label class="form-label fw-bold">Inspector Initials</label>
+                            <input type="text" id="initials" class="form-control" placeholder="e.g. RM" oninput="forceSaveDraftNow()">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-bold">Shift Window</label>
+                            <select id="shift" class="form-control" onchange="handleShiftSelectionContextChange()">
+                                <option value="" disabled selected>Select Shift Window...</option>
+                                <option value="7-8AM">7-8 AM Shift (6AM-9AM)</option>
+                                <option value="3PM">3 PM Shift (2PM-5PM)</option>
+                                <option value="9PM">9 PM Shift (7PM-9:30PM)</option>
+                                <option value="Recheck">Recheck (Ad-Hoc Check)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="dynamicWizardContainer"></div>
+
+                    <div class="bg-light p-3 rounded border mb-3">
+                        <label class="form-label fw-bold text-secondary">📋 Freehand Inspector Shift Notes</label>
+                        <textarea id="freehandNotes" class="form-control" rows="2" placeholder="Enter custom log observations or rack notes..." oninput="forceSaveDraftNow()"></textarea>
+                    </div>
+
+                    <button type="button" id="validateFormBtn" onclick="runStageOneValidation()" class="btn btn-primary w-100 mt-2 py-2 shadow-sm fw-bold fs-5">🔍 Step 1: Validate Floor Sheet</button>
+                    <button type="button" id="validateActionsBtn" style="display:none;" onclick="runStageTwoValidation()" class="btn btn-warning w-100 mt-2 py-2 shadow-sm fw-bold fs-5 text-dark">🛡️ Step 2: Verify Corrections</button>
+                    <button type="button" id="finalSubmitBtn" disabled onclick="transmitLogsToCloud()" class="btn btn-secondary w-100 mt-2 py-3 shadow-sm fw-bold fs-5">🔒 Complete Log & Submit to Sheet</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="trendChartModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered full-screen-fluid-dialog">
+        <div class="modal-content shadow-lg">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title" id="trendModalTitle">Case Analysis Trendline Matrix</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body bg-white p-4">
+                <div class="fluid-canvas-viewport">
+                    <canvas id="canvasTrendTrackerNode"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    const cloudSpreadsheetURL = "https://script.google.com/macros/s/AKfycbzrYAYfyquAfZHMFKf-60GiTj8GbTQRa97ujMuWk7kdU7JJxpo4mW4Ds5AMWWRbK0R4/exec";
+    const draftStorageKey = "five_star_active_draft_session";
+    const activeSessionKey = "five_star_route_active";
+    const indexedDbName = "five_star_refrigeration_pwa";
+    const indexedDbStoreName = "drafts";
+    const indexedDbDraftKey = "active_route_draft";
+
+    function openDraftDatabase() {
+        return new Promise((resolve, reject) => {
+            if (!("indexedDB" in window)) {
+                reject(new Error("IndexedDB is not available on this device."));
+                return;
+            }
+
+            const request = indexedDB.open(indexedDbName, 1);
+
+            request.onupgradeneeded = function(event) {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(indexedDbStoreName)) {
+                    db.createObjectStore(indexedDbStoreName, { keyPath: "id" });
+                }
+            };
+
+            request.onsuccess = function(event) {
+                resolve(event.target.result);
+            };
+
+            request.onerror = function(event) {
+                reject(event.target.error);
+            };
+        });
+    }
+
+    async function saveDraftToIndexedDB(draft) {
+        try {
+            const db = await openDraftDatabase();
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(indexedDbStoreName, "readwrite");
+                const store = tx.objectStore(indexedDbStoreName);
+                store.put({ id: indexedDbDraftKey, draft: draft, savedAt: new Date().toISOString() });
+                tx.oncomplete = resolve;
+                tx.onerror = function(event) { reject(event.target.error); };
+            });
+            db.close();
+        } catch (err) {
+            console.log("IndexedDB draft save failed; localStorage/cloud backup still active.", err);
+        }
+    }
+
+    async function loadDraftFromIndexedDB() {
+        try {
+            const db = await openDraftDatabase();
+            const record = await new Promise((resolve, reject) => {
+                const tx = db.transaction(indexedDbStoreName, "readonly");
+                const store = tx.objectStore(indexedDbStoreName);
+                const request = store.get(indexedDbDraftKey);
+                request.onsuccess = function() { resolve(request.result || null); };
+                request.onerror = function(event) { reject(event.target.error); };
+            });
+            db.close();
+            return record ? record.draft : null;
+        } catch (err) {
+            console.log("IndexedDB draft load failed.", err);
+            return null;
+        }
+    }
+
+    async function clearIndexedDBDraft() {
+        try {
+            const db = await openDraftDatabase();
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(indexedDbStoreName, "readwrite");
+                const store = tx.objectStore(indexedDbStoreName);
+                store.delete(indexedDbDraftKey);
+                tx.oncomplete = resolve;
+                tx.onerror = function(event) { reject(event.target.error); };
+            });
+            db.close();
+        } catch (err) {
+            console.log("IndexedDB draft clear failed.", err);
+        }
+    }
+
+    async function restoreIndexedDraftToLocalStorageIfNeeded() {
+        if (localStorage.getItem(draftStorageKey)) return false;
+
+        const indexedDraft = await loadDraftFromIndexedDB();
+        if (!indexedDraft) return false;
+
+        localStorage.setItem(draftStorageKey, JSON.stringify(indexedDraft));
+        localStorage.setItem(activeSessionKey, "true");
+        isInspectionActive = true;
+        return true;
+    }
+
+    const limitsSchema = {
+        sec1: { title: "🥛 1. Dairy / Refrigerated", min: 28.5, max: 40 },
+        sec2: { title: "🍦 2. Ice Cream / Frozen", min: -15, max: 10 },
+        sec3: { title: "📦 3. Frozen Prepared Foods", min: -15, max: 10 },
+        sec4: { title: "🥩 4. Fresh Meat / Seafood", min: 28, max: 38 },
+        sec5: { title: "🥪 5. Deli / Lunchmeat Cases", min: 28, max: 40 },
+        sec6: { title: "🍎 6. Fresh Produce Displays", min: 30, max: 55 }
+    };
+
+    let activeStructuralMap = {};
+    let localCacheHistory = [];
+    let currentViewerIndex = -1;
+    let backgroundRefreshPollerId = null;
+    let isInspectionActive = false;
+    let runtimeCheckboxStateMemory = {};
+    let globalChartInstanceReference = null;
+    let appleGlobalPendingAsset = "";
+    let appleGlobalPendingLimits = null;
+    let rawCloudSequenceMap = {};
+    let calculatedSequenceArray = [];
+    let clientObservedTemp = "72°F";
+    let clientObservedCond = "Clear Sky";
+    let activeDashboardMemoryCache = {};
+    let absoluteLastSyncTimestampMemory = Date.now();
+
+    function updateLiveClockAndWeather() {
+        const now = new Date();
+        document.getElementById('liveClock').innerText = now.toLocaleString();
+
+        fetch('https://api.open-meteo.com/v1/forecast?latitude=41.2959&longitude=-86.6222&current=temperature_2m,weather_code&temperature_unit=fahrenheit')
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.current) {
+                    let rawTemp = data.current.temperature_2m !== undefined ? data.current.temperature_2m : 72;
+                    clientObservedTemp = Math.round(rawTemp) + "°F";
+
+                    const code = data.current.weather_code !== undefined ? data.current.weather_code : 0;
+                    if (code === 0) clientObservedCond = "Clear Sky";
+                    else if (code <= 3) clientObservedCond = "Partly Cloudy";
+                    else if (code <= 65) clientObservedCond = "Rain Showers";
+                    else clientObservedCond = "Overcast";
+
+                    if (currentViewerIndex === -1) {
+                        const weatherViewNode = document.getElementById('dashboardWeatherView');
+                        if (weatherViewNode) {
+                            weatherViewNode.innerText = `Weather Knox (46534): ${clientObservedTemp} | ${clientObservedCond}`;
+                        }
+                    }
+                }
+            })
+            .catch(() => {
+                clientObservedTemp = "72°F";
+                clientObservedCond = "Clear Sky";
+            });
+    }
+
+    function determineStatusClass(value, limits) {
+        if (isNaN(value) || value === null || value === "") return "";
+        if (value < limits.min || value > limits.max) return "status-red";
+        if (value >= (limits.max - 1.5) || value <= (limits.min + 0.5)) return "status-yellow";
+        return "status-green";
+    }
+
+    function evaluateFieldStyle(inputElement, sectionId) {
+        const value = parseFloat(inputElement.value);
+        inputElement.classList.remove('status-green', 'status-yellow', 'status-red', 'field-error');
+
+        if (!isNaN(value)) {
+            inputElement.classList.add(determineStatusClass(value, limitsSchema[sectionId]));
+        }
+
+        forceSaveDraftNow();
+        lockSubmissionOnChanges();
+    }
+
+    function lockSubmissionOnChanges() {
+        const finalSubmitBtn = document.getElementById('finalSubmitBtn');
+        const validateActionsBtn = document.getElementById('validateActionsBtn');
+
+        if (!finalSubmitBtn || !validateActionsBtn) return;
+
+        finalSubmitBtn.disabled = true;
+        finalSubmitBtn.classList.remove('btn-success');
+        finalSubmitBtn.classList.add('btn-secondary');
+        validateActionsBtn.style.display = "none";
+    }
+
+    function forceSaveDraftNow() {
+        if (!isInspectionActive && localStorage.getItem(activeSessionKey) !== "true") return;
+
+        isInspectionActive = true;
+        localStorage.setItem(activeSessionKey, "true");
+        saveDraftProgressData();
+    }
+
+    function saveDraftProgressData() {
+        const initialsNode = document.getElementById('initials');
+        const shiftNode = document.getElementById('shift');
+        const notesNode = document.getElementById('freehandNotes');
+
+        if (!initialsNode || !shiftNode || !notesNode) return;
+
+        let draft = {
+            savedAt: new Date().toISOString(),
+            initials: initialsNode.value,
+            shift: shiftNode.value,
+            freehandNotes: notesNode.value,
+            temperatures: {},
+            checkboxes: runtimeCheckboxStateMemory
+        };
+
+        document.querySelectorAll('input[data-sec]').forEach(input => {
+            draft.temperatures[input.getAttribute('data-name')] = input.value;
+        });
+
+        localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+        localStorage.setItem(activeSessionKey, "true");
+        saveDraftToIndexedDB(draft);
+    }
+
+    function handleShiftSelectionContextChange() {
+        isInspectionActive = true;
+        localStorage.setItem(activeSessionKey, "true");
+
+        const selectedShiftValue = document.getElementById('shift').value;
+
+        if (selectedShiftValue === "Recheck") {
+            document.querySelectorAll('input[data-sec]').forEach(input => {
+                if (input.value.trim() !== "") return;
+
+                const assetName = input.getAttribute('data-name');
+                const sectionId = input.getAttribute('data-sec');
+                const limits = limitsSchema[sectionId];
+                const cachedData = activeDashboardMemoryCache[assetName];
+
+                if (cachedData && cachedData.temp !== "N/A" && cachedData.temp !== "") {
+                    const priorTemperatureValue = parseFloat(cachedData.temp);
+
+                    if (!isNaN(priorTemperatureValue)) {
+                        const priorStatusClass = determineStatusClass(priorTemperatureValue, limits);
+
+                        if (priorStatusClass === "status-green") {
+                            input.value = priorTemperatureValue;
+                            evaluateFieldStyle(input, sectionId);
+                        }
+                    }
+                }
+            });
+        }
+
+        saveDraftProgressData();
+        lockSubmissionOnChanges();
+    }
+
+    function loadSavedDraftProgressData() {
+        let rawDraft = localStorage.getItem(draftStorageKey);
+        if (!rawDraft) return;
+
+        let draft;
+
+        try {
+            draft = JSON.parse(rawDraft);
+        } catch (err) {
+            console.error("Saved draft was corrupted and could not be restored.", err);
+            return;
+        }
+
+        isInspectionActive = true;
+        localStorage.setItem(activeSessionKey, "true");
+        clearInterval(backgroundRefreshPollerId);
+
+        document.getElementById('initials').value = draft.initials || "";
+        document.getElementById('shift').value = draft.shift || "";
+        document.getElementById('freehandNotes').value = draft.freehandNotes || "";
+        runtimeCheckboxStateMemory = draft.checkboxes || {};
+
+        document.querySelectorAll('input[data-sec]').forEach(input => {
+            let name = input.getAttribute('data-name');
+            if (draft.temperatures && draft.temperatures[name] !== undefined) {
+                input.value = draft.temperatures[name];
+                evaluateFieldStyle(input, input.getAttribute('data-sec'));
+            }
+        });
+
+        document.getElementById('masterForm').classList.remove('form-locked-state');
+
+        const sessionBtn = document.getElementById('kioskSessionBtn');
+        sessionBtn.innerText = "🛑 Cancel & Reset Route";
+        sessionBtn.className = "btn btn-danger fw-bold px-4 shadow-sm";
+    }
+
+    function forceReadyEntryStateUntilSubmit() {
+        if (localStorage.getItem(activeSessionKey) === "true") {
+            isInspectionActive = true;
+
+            const form = document.getElementById('masterForm');
+            const sessionBtn = document.getElementById('kioskSessionBtn');
+
+            if (form) form.classList.remove('form-locked-state');
+
+            if (sessionBtn) {
+                sessionBtn.innerText = "🛑 Cancel & Reset Route";
+                sessionBtn.className = "btn btn-danger fw-bold px-4 shadow-sm";
+            }
+        }
+    }
+
+    function clearSavedRouteSession() {
+        localStorage.removeItem(draftStorageKey);
+        localStorage.removeItem(activeSessionKey);
+        clearIndexedDBDraft();
+    }
+
+
+    function getOrCreateDeviceId() {
+        let deviceId = localStorage.getItem("five_star_device_id");
+
+        if (!deviceId) {
+            deviceId = "ipad_" + Date.now() + "_" + Math.random().toString(36).slice(2);
+            localStorage.setItem("five_star_device_id", deviceId);
+        }
+
+        return deviceId;
+    }
+
+    function buildCloudDraftPayload() {
+        let draftPackage = [];
+
+        document.querySelectorAll('input[data-sec]').forEach(input => {
+            draftPackage.push({
+                department: limitsSchema[input.getAttribute('data-sec')] ? limitsSchema[input.getAttribute('data-sec')].title : input.getAttribute('data-sec'),
+                cooler_name: input.getAttribute('data-name'),
+                temperature: input.value,
+                section: input.getAttribute('data-sec')
+            });
+        });
+
+        return {
+            routing_action: "SAVE_CONFIG_DRAFT",
+            device_id: getOrCreateDeviceId(),
+            time: new Date().toLocaleString(),
+            user: document.getElementById('initials').value.toUpperCase(),
+            shift: document.getElementById('shift').value,
+            inspector_notes: document.getElementById('freehandNotes').value,
+            records_package: draftPackage,
+            outdoor_temp: clientObservedTemp,
+            weather_cond: clientObservedCond
+        };
+    }
+
+    function backupDraftToCloud() {
+        if (!isInspectionActive && localStorage.getItem(activeSessionKey) !== "true") return;
+
+        fetch(cloudSpreadsheetURL, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify(buildCloudDraftPayload())
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status !== "success") {
+                console.log("Config draft backup did not confirm success:", data);
+            }
+        })
+        .catch(() => {
+            console.log("Config draft backup failed. Local draft remains saved.");
+        });
+    }
+
+    function loadDraftFromCloud() {
+        return fetch(cloudSpreadsheetURL, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({
+                routing_action: "LOAD_CONFIG_DRAFT",
+                device_id: getOrCreateDeviceId()
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status !== "success" || !data.draft) return false;
+
+            const cloudDraft = data.draft;
+
+            localStorage.setItem(draftStorageKey, JSON.stringify({
+                savedAt: new Date().toISOString(),
+                initials: cloudDraft.initials || "",
+                shift: cloudDraft.shift || "",
+                freehandNotes: cloudDraft.freehandNotes || "",
+                temperatures: cloudDraft.temperatures || {},
+                checkboxes: {}
+            }));
+
+            localStorage.setItem(activeSessionKey, "true");
+            isInspectionActive = true;
+
+            return true;
+        })
+        .catch(() => {
+            console.log("No Config draft restored.");
+            return false;
+        });
+    }
+
+    function clearCloudDraft() {
+        return fetch(cloudSpreadsheetURL, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({
+                routing_action: "CLEAR_CONFIG_DRAFT",
+                device_id: getOrCreateDeviceId()
+            })
+        })
+        .catch(() => {
+            console.log("Config draft clear failed, but final submission was already attempted.");
+        });
+    }
+
+    function toggleKioskFormInterlock() {
+        const targetForm = document.getElementById('masterForm');
+        const sessionBtn = document.getElementById('kioskSessionBtn');
+
+        if (!isInspectionActive) {
+            isInspectionActive = true;
+            localStorage.setItem(activeSessionKey, "true");
+            clearInterval(backgroundRefreshPollerId);
+            runtimeCheckboxStateMemory = {};
+
+            sessionBtn.innerText = "⏳ Syncing Store Database Layout...";
+            sessionBtn.className = "btn btn-secondary fw-bold px-4 shadow-sm";
+
+            fetch(cloudSpreadsheetURL)
+                .then(res => res.json())
+                .then(res => {
+                    if (res.status === "success") {
+                        activeStructuralMap = res.structural_schema;
+
+                        if (res.display_order_map) rawCloudSequenceMap = res.display_order_map;
+                        else if (res.sequence_map) rawCloudSequenceMap = res.sequence_map;
+                        else if (res.walkway_sequence_map) rawCloudSequenceMap = res.walkway_sequence_map;
+                        else rawCloudSequenceMap = {};
+
+                        renderDynamicFormElements(res.structural_schema);
+
+                        if (res.historical_ledger_packages) localCacheHistory = res.historical_ledger_packages;
+                        if (res.current_status) activeDashboardMemoryCache = res.current_status;
+
+                        targetForm.classList.remove('form-locked-state');
+                        sessionBtn.innerText = "🛑 Cancel & Reset Route";
+                        sessionBtn.className = "btn btn-danger fw-bold px-4 shadow-sm";
+
+                        saveDraftProgressData();
+                        setTimeout(focusInitialWalkwayElement, 500);
+                    }
+                });
+        } else {
+            if (confirm("Are you sure you want to cancel? This will completely erase all progress and saved drafts.")) {
+                clearCloudDraft().finally(() => {
+                    clearSavedRouteSession();
+                    forceSessionShutdownReset();
+                });
+            }
+        }
+    }
+
+    function forceSessionShutdownReset() {
+        isInspectionActive = false;
+        runtimeCheckboxStateMemory = {};
+        clearSavedRouteSession();
+
+        document.getElementById('masterForm').reset();
+        document.getElementById('masterForm').classList.add('form-locked-state');
+
+        const sessionBtn = document.getElementById('kioskSessionBtn');
+        sessionBtn.innerText = "🟢 Start New Inspection Route";
+        sessionBtn.className = "btn btn-success fw-bold px-4 shadow-sm";
+
+        lockSubmissionOnChanges();
+        pullSystemStructure();
+
+        absoluteLastSyncTimestampMemory = Date.now();
+        startAutomaticDashboardPolling();
+    }
+
+    function startAutomaticDashboardPolling() {
+        clearInterval(backgroundRefreshPollerId);
+
+        backgroundRefreshPollerId = setInterval(() => {
+            const rightNow = Date.now();
+            const fifteenMinutesInMilliseconds = 15 * 60 * 1000;
+
+            if (!isInspectionActive && currentViewerIndex === -1) {
+                if (rightNow - absoluteLastSyncTimestampMemory >= fifteenMinutesInMilliseconds) {
+                    absoluteLastSyncTimestampMemory = rightNow;
+                    pullSystemStructure();
+                }
+            }
+        }, 30000);
+    }
+
+    function pullSystemStructure() {
+        fetch(cloudSpreadsheetURL)
+            .then(res => res.json())
+            .then(res => {
+                if (res.status === "success") {
+                    activeStructuralMap = res.structural_schema;
+
+                    if (res.display_order_map) rawCloudSequenceMap = res.display_order_map;
+                    else if (res.sequence_map) rawCloudSequenceMap = res.sequence_map;
+                    else if (res.walkway_sequence_map) rawCloudSequenceMap = res.walkway_sequence_map;
+                    else rawCloudSequenceMap = {};
+
+                    if (!isInspectionActive || localStorage.getItem(activeSessionKey) === "true") {
+                        renderDynamicFormElements(res.structural_schema);
+                    }
+
+                    if (res.historical_ledger_packages) localCacheHistory = res.historical_ledger_packages;
+                    if (res.current_status) activeDashboardMemoryCache = res.current_status;
+
+                    if (localStorage.getItem(activeSessionKey) === "true") {
+                        forceReadyEntryStateUntilSubmit();
+
+                        if (localStorage.getItem(draftStorageKey)) {
+                            loadSavedDraftProgressData();
+                        } else {
+                            saveDraftProgressData();
+                        }
+                    }
+
+                    if (currentViewerIndex === -1) {
+                        processDashboardViewUpdate(res.current_status, true, res.meta_last_log);
+                    }
+                }
+            });
+    }
+
+    function renderDynamicFormElements(schema) {
+        const container = document.getElementById('dynamicWizardContainer');
+        container.innerHTML = '';
+
+        for (let secId in limitsSchema) {
+            let assets = schema[secId] || [];
+            if (assets.length === 0) continue;
+
+            let html = `<div class="section-block" id="block-${secId}">
+                <h5 class="fw-bold text-primary mb-3">${limitsSchema[secId].title} (${limitsSchema[secId].min}°F - ${limitsSchema[secId].max}°F)</h5>
+                <div class="row g-2">`;
+
+            assets.forEach((asset, idx) => {
+                let identifier = `${secId}_${idx}`;
+                html += `<div class="col-6 alert-item-container" id="container-${identifier}">
+                    <label class="small fw-semibold text-muted d-block text-truncate">${asset}</label>
+                    <input type="number"
+                           data-sec="${secId}"
+                           data-name="${asset}"
+                           id="input-${identifier}"
+                           class="form-control form-control-sm walkway-input-node"
+                           step="0.1"
+                           inputmode="decimal">
+                </div>`;
+            });
+
+            html += `</div><div class="dynamic-action-area mt-3" id="actions-${secId}"></div></div>`;
+            container.innerHTML += html;
+        }
+
+        rebuildDynamicCloudSequenceArray();
+    }
+
+    function rebuildDynamicCloudSequenceArray() {
+        calculatedSequenceArray = Array.from(document.querySelectorAll('.walkway-input-node'));
+        let useCloudSort = Object.keys(rawCloudSequenceMap).length > 0;
+
+        if (useCloudSort) {
+            calculatedSequenceArray.sort((a, b) => {
+                let nameA = a.getAttribute('data-name');
+                let nameB = b.getAttribute('data-name');
+
+                let rawOrderA = 9999;
+                let rawOrderB = 9999;
+
+                if (rawCloudSequenceMap[nameA] !== undefined) rawOrderA = rawCloudSequenceMap[nameA];
+                if (rawCloudSequenceMap[nameB] !== undefined) rawOrderB = rawCloudSequenceMap[nameB];
+
+                let orderA = (rawOrderA === "" || rawOrderA === null || isNaN(parseFloat(rawOrderA))) ? 9999 : parseFloat(rawOrderA);
+                let orderB = (rawOrderB === "" || rawOrderB === null || isNaN(parseFloat(rawOrderB))) ? 9999 : parseFloat(rawOrderB);
+
+                return orderA - orderB;
+            });
+        }
+
+        calculatedSequenceArray.forEach((input, index) => {
+            input.setAttribute('data-walk-index', index);
+
+            input.removeEventListener('keydown', handleWalkwayKeyboardInterration);
+            input.removeEventListener('focus', handleWalkwayFocusHighlighter);
+            input.removeEventListener('blur', handleWalkwayBlurClearer);
+            input.removeEventListener('input', handleNativeInputOverride);
+
+            input.addEventListener('keydown', handleWalkwayKeyboardInterration);
+            input.addEventListener('focus', handleWalkwayFocusHighlighter);
+            input.addEventListener('blur', handleWalkwayBlurClearer);
+            input.addEventListener('input', handleNativeInputOverride);
+        });
+    }
+
+    function handleNativeInputOverride(e) {
+        evaluateFieldStyle(e.target, e.target.getAttribute('data-sec'));
+    }
+
+    function focusInitialWalkwayElement() {
+        if (calculatedSequenceArray.length > 0) {
+            calculatedSequenceArray[0].focus();
+        }
+    }
+
+    function handleWalkwayFocusHighlighter(e) {
+        const inputId = e.target.id;
+        const containerId = inputId.replace('input-', 'container-');
+        const containerNode = document.getElementById(containerId);
+        if (containerNode) containerNode.classList.add('active-walkway-focus');
+    }
+
+    function handleWalkwayBlurClearer(e) {
+        const inputId = e.target.id;
+        const containerId = inputId.replace('input-', 'container-');
+        const containerNode = document.getElementById(containerId);
+        if (containerNode) containerNode.classList.remove('active-walkway-focus');
+    }
+
+    function handleWalkwayKeyboardInterration(e) {
+        if (e.key === 'Enter' || e.keyCode === 13) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const currentIndex = parseInt(e.target.getAttribute('data-walk-index'));
+            const nextIndex = currentIndex + 1;
+
+            if (nextIndex < calculatedSequenceArray.length) {
+                const nextTargetInput = calculatedSequenceArray[nextIndex];
+                nextTargetInput.focus();
+                nextTargetInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else {
+                e.target.blur();
+                const validateBtn = document.getElementById('validateFormBtn');
+                if (validateBtn) validateBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                alert("🏁 Walkthrough complete! Click 'Step 1: Validate Floor Sheet' to verify your data.");
+            }
+        }
+    }
+
+    function saveActiveCheckboxesToMemory() {
+        document.querySelectorAll('.action-checkbox-node').forEach(cb => {
+            const coolerKey = cb.getAttribute('data-cooler-key');
+            const val = cb.value;
+
+            if (!runtimeCheckboxStateMemory[coolerKey]) {
+                runtimeCheckboxStateMemory[coolerKey] = {};
+            }
+
+            runtimeCheckboxStateMemory[coolerKey][val] = cb.checked;
+        });
+
+        forceSaveDraftNow();
+    }
+
+    function navigateHistory(direction) {
+        if (isInspectionActive) {
+            alert("⚠️ Cannot browse history while an active inspection route is open.");
+            return;
+        }
+
+        if (localCacheHistory.length === 0) {
+            alert("📋 No logs discovered in database yet.");
+            return;
+        }
+
+        if (currentViewerIndex === -1) {
+            currentViewerIndex = 0;
+        } else {
+            currentViewerIndex = currentViewerIndex - direction;
+        }
+
+        if (currentViewerIndex < 0) {
+            jumpToLiveStream();
+            return;
+        }
+
+        if (currentViewerIndex >= localCacheHistory.length) {
+            currentViewerIndex = localCacheHistory.length - 1;
+            alert("⏮️ Reached oldest historical data block.");
+            return;
+        }
+
+        const targetedRecord = localCacheHistory[currentViewerIndex];
+        processDashboardViewUpdate(targetedRecord.status_map, false, targetedRecord.meta_string);
+
+        const modeInd = document.getElementById('dashboardModeIndicator');
+        modeInd.innerText = `Report [${currentViewerIndex + 1}/${localCacheHistory.length}]`;
+        modeInd.className = "badge bg-warning text-dark live-indicator";
+    }
+
+    function jumpToLiveStream() {
+        currentViewerIndex = -1;
+
+        const modeInd = document.getElementById('dashboardModeIndicator');
+        modeInd.innerText = "● Real-Time Cloud";
+        modeInd.className = "badge bg-success live-indicator";
+
+        pullSystemStructure();
+    }
+
+    function processDashboardViewUpdate(statusMap, isLiveCloudData, metaString) {
+        if (!statusMap) statusMap = {};
+
+        let prefixText = isLiveCloudData ? "Last Logged: " : "Viewing Past Report: ";
+        document.getElementById('latestLogMeta').innerText = `${prefixText}${metaString || "N/A"}`;
+
+        let extractedNotes = "None Logged";
+        let extractedTemp = "N/A";
+        let extractedCond = "N/A";
+
+        for (let key in statusMap) {
+            if (statusMap[key]) {
+                if (statusMap[key].notes_field && statusMap[key].notes_field !== "undefined") extractedNotes = statusMap[key].notes_field;
+                if (statusMap[key].outdoor_temp && statusMap[key].outdoor_temp !== "N/A") extractedTemp = statusMap[key].outdoor_temp;
+                if (statusMap[key].weather_cond && statusMap[key].weather_cond !== "N/A") extractedCond = statusMap[key].weather_cond;
+            }
+        }
+
+        document.getElementById('dashboardWeatherView').innerText = `Weather Knox (46534): ${extractedTemp} | ${extractedCond}`;
+        document.getElementById('dashboardNotesView').innerText = "Notes: " + extractedNotes;
+
+        renderDashboardLights(activeStructuralMap, statusMap);
+    }
+
+    function renderDashboardLights(schema, statusRecords) {
+        const dashboard = document.getElementById('fullWidthStatusDashboard');
+        dashboard.innerHTML = '';
+
+        for (let secId in limitsSchema) {
+            let assets = schema[secId] || [];
+
+            assets.forEach(assetName => {
+                let data = statusRecords[assetName] || { temp: "N/A", action: "" };
+                let lightClass = "dot-gray";
+                let alertClass = "";
+                let actionableTextDiv = "";
+                let valueText = "N/A";
+
+                if (data.temp !== "N/A" && data.temp !== undefined && data.temp !== "") {
+                    let actualVal = parseFloat(data.temp);
+
+                    if (!isNaN(actualVal)) {
+                        let cls = determineStatusClass(actualVal, limitsSchema[secId]);
+
+                        if (cls === "status-red") {
+                            lightClass = "dot-red";
+                            alertClass = "badge-danger-alert";
+                            let actText = data.action || "Action Logged";
+                            actionableTextDiv = `<div class="badge-action-text text-red-alert">🛠️ ${actText}</div>`;
+                        } else if (cls === "status-yellow") {
+                            lightClass = "dot-yellow";
+                            alertClass = "badge-warning-alert";
+                            let actText = data.action || "Rechecking in 1 Hour";
+                            actionableTextDiv = `<div class="badge-action-text text-yellow-alert">⏳ ${actText}</div>`;
+                        } else if (cls === "status-green") {
+                            lightClass = "dot-green";
+                        }
+
+                        valueText = `${actualVal}°F`;
+                    }
+                }
+
+                dashboard.innerHTML += `<div class="dashboard-badge shadow-sm ${alertClass}" onclick="launchTrendDiagnosticsWindow('${assetName.replace(/'/g, "\\'")}', '${secId}')">
+                    <div class="d-flex justify-content-between align-items-center w-100">
+                        <div class="text-truncate" style="max-width:140px;">
+                            <span class="status-dot ${lightClass}"></span><span class="fw-semibold">${assetName}</span>
+                        </div>
+                        <span class="fw-bold text-secondary">${valueText}</span>
+                    </div>
+                    ${actionableTextDiv}
+                </div>`;
+            });
+        }
+    }
+
+    function launchTrendDiagnosticsWindow(assetName, sectionId) {
+        if (!localCacheHistory || localCacheHistory.length === 0) {
+            alert("📊 Insufficient historical entries recorded in cache.");
+            return;
+        }
+
+        appleGlobalPendingAsset = assetName;
+        appleGlobalPendingLimits = limitsSchema[sectionId];
+
+        let targetModalNode = document.getElementById('trendChartModal');
+        let modalInstance = bootstrap.Modal.getInstance(targetModalNode) || new bootstrap.Modal(targetModalNode);
+        modalInstance.show();
+    }
+
+    function transmitLogsToCloud() {
+        saveActiveCheckboxesToMemory();
+        forceSaveDraftNow();
+
+        const submitBtn = document.getElementById('finalSubmitBtn');
+        submitBtn.disabled = true;
+        submitBtn.innerText = "⏳ Synchronizing Log Stream...";
+
+        let package = [];
+        let sharedNotes = document.getElementById('freehandNotes').value.trim() || "None Logged";
+
+        document.querySelectorAll('input[data-sec]').forEach(input => {
+            package.push({
+                cooler_name: input.getAttribute('data-name'),
+                temperature: parseFloat(input.value),
+                action_taken: "Logged Status Passed"
+            });
+        });
+
+        fetch(cloudSpreadsheetURL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+                routing_action: "SUBMIT_DATA_STREAM",
+                time: new Date().toLocaleString(),
+                user: document.getElementById('initials').value.toUpperCase(),
+                shift: document.getElementById('shift').value,
+                inspector_notes: sharedNotes,
+                records_package: package,
+                outdoor_temp: clientObservedTemp,
+                weather_cond: clientObservedCond
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status !== "success") {
+                throw new Error(data.message || "Spreadsheet did not confirm successful submission.");
+            }
+
+            clearCloudDraft().finally(() => {
+                alert("🚀 Log secure-synced to spreadsheet records!");
+                clearSavedRouteSession();
+                forceSessionShutdownReset();
+            });
+        })
+        .catch(() => {
+            alert("⚠️ Connection Timeout. Your draft is still saved on this iPad. Try submitting again.");
+            submitBtn.disabled = false;
+            submitBtn.innerText = "🔒 Complete Log & Submit to Sheet";
+            forceSaveDraftNow();
+        });
+    }
+
+    function modifyAssetRegistry(routingActionName) {
+        let section = document.getElementById('mgmtSection').value;
+        let coolerName = document.getElementById('mgmtCoolerName').value.trim();
+        let orderRank = document.getElementById('mgmtPlacementOrder').value.trim();
+        let code = document.getElementById('mgmtAuthCode').value.trim();
+
+        if (!coolerName || !code) {
+            alert("⚠️ Asset name and authorization PIN are strictly required.");
+            return;
+        }
+
+        if (!confirm(`Commit configuration changes to the store layout?`)) return;
+
+        fetch(cloudSpreadsheetURL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+                routing_action: routingActionName,
+                target_section: section,
+                new_asset_name: coolerName,
+                asset_name: coolerName,
+                target_order: orderRank,
+                auth_code: code
+            })
+        })
+        .then(() => {
+            alert("⚙️ Configuration modified!");
+            document.getElementById('mgmtCoolerName').value = '';
+            document.getElementById('mgmtPlacementOrder').value = '';
+            document.getElementById('mgmtAuthCode').value = '';
+            setTimeout(pullSystemStructure, 1000);
+        });
+    }
+
+    function attachIPadDraftProtectionHandlers() {
+        document.addEventListener("input", forceSaveDraftNow, true);
+        document.addEventListener("change", forceSaveDraftNow, true);
+
+        document.addEventListener("visibilitychange", function() {
+            if (document.visibilityState === "hidden") {
+                forceSaveDraftNow();
+                backupDraftToCloud();
+            }
+        });
+
+        window.addEventListener("pagehide", function() {
+            forceSaveDraftNow();
+            backupDraftToCloud();
+        });
+        window.addEventListener("beforeunload", function() {
+            forceSaveDraftNow();
+            backupDraftToCloud();
+        });
+        window.addEventListener("blur", function() {
+            forceSaveDraftNow();
+            backupDraftToCloud();
+        });
+
+        setInterval(function() {
+            if (isInspectionActive || localStorage.getItem(activeSessionKey) === "true") {
+                forceSaveDraftNow();
+            }
+        }, 3000);
+
+        setInterval(function() {
+            if (isInspectionActive || localStorage.getItem(activeSessionKey) === "true") {
+                forceSaveDraftNow();
+                backupDraftToCloud();
+            }
+        }, 10000);
+    }
+
+
+
+    function registerServiceWorker() {
+        if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.register("service-worker.js")
+                .then(() => console.log("Five Star PWA service worker registered."))
+                .catch(err => console.log("Service worker registration failed:", err));
+        }
+    }
+
+    window.onload = async function() {
+        absoluteLastSyncTimestampMemory = Date.now();
+
+        registerServiceWorker();
+        attachIPadDraftProtectionHandlers();
+        await restoreIndexedDraftToLocalStorageIfNeeded();
+        forceReadyEntryStateUntilSubmit();
+
+        updateLiveClockAndWeather();
+        setInterval(updateLiveClockAndWeather, 60000);
+
+        if (!localStorage.getItem(draftStorageKey)) {
+            loadDraftFromCloud().finally(() => {
+                pullSystemStructure();
+            });
+        } else {
+            pullSystemStructure();
+        }
+
+        startAutomaticDashboardPolling();
+
+        var targetModalNode = document.getElementById('trendChartModal');
+
+        targetModalNode.addEventListener('shown.bs.modal', function () {
+            if (!appleGlobalPendingAsset || !appleGlobalPendingLimits) return;
+
+            let labelsTimeline = [];
+            let dataPointsPlot = [];
+            let dataCount = 0;
+
+            for (let i = 0; i < localCacheHistory.length; i++) {
+                let recordBlock = localCacheHistory[i];
+
+                if (recordBlock.status_map && recordBlock.status_map[appleGlobalPendingAsset]) {
+                    let entryData = recordBlock.status_map[appleGlobalPendingAsset];
+
+                    if (entryData.temp !== "N/A" && entryData.temp !== undefined && entryData.temp !== "") {
+                        let rawVal = parseFloat(entryData.temp);
+
+                        if (!isNaN(rawVal)) {
+                            let cleanTimeLabel = "Check " + (dataCount + 1);
+
+                            if (recordBlock.meta_string && recordBlock.meta_string.includes("on ")) {
+                                let parts = recordBlock.meta_string.split("on ");
+                                let shiftPart = recordBlock.meta_string.split("Shift ")[1] ? recordBlock.meta_string.split("Shift ")[1].split(" ")[0] : "";
+                                cleanTimeLabel = parts[1].split(",")[0] + " (" + shiftPart + ")";
+                            }
+
+                            labelsTimeline.push(cleanTimeLabel);
+                            dataPointsPlot.push(rawVal);
+                            dataCount++;
+                        }
+                    }
+                }
+            }
+
+            if (labelsTimeline.length > 50) {
+                labelsTimeline = labelsTimeline.slice(-50);
+                dataPointsPlot = dataPointsPlot.slice(-50);
+            }
+
+            if (dataPointsPlot.length === 0) return;
+
+            document.getElementById('trendModalTitle').innerText = `📈 50-Check Operational Trend Matrix: ${appleGlobalPendingAsset}`;
+
+            if (globalChartInstanceReference) globalChartInstanceReference.destroy();
+
+            const ctx = document.getElementById('canvasTrendTrackerNode').getContext('2d');
+
+            globalChartInstanceReference = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labelsTimeline,
+                    datasets: [
+                        {
+                            label: 'Asset Reading (°F)',
+                            data: dataPointsPlot,
+                            borderColor: '#0d6efd',
+                            backgroundColor: 'rgba(13, 110, 253, 0.08)',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            pointRadius: 3,
+                            pointBackgroundColor: '#0d6efd',
+                            fill: true
+                        },
+                        {
+                            label: 'Max Limit (' + appleGlobalPendingLimits.max + '°F)',
+                            data: Array(labelsTimeline.length).fill(appleGlobalPendingLimits.max),
+                            borderColor: '#dc3545',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'Min Limit (' + appleGlobalPendingLimits.min + '°F)',
+                            data: Array(labelsTimeline.length).fill(appleGlobalPendingLimits.min),
+                            borderColor: '#198754',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                font: { size: 11, weight: 'bold' }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            ticks: {
+                                callback: function(v) { return v + '°F'; },
+                                font: { weight: 'bold' }
+                            },
+                            suggestedMin: Math.min(...dataPointsPlot, appleGlobalPendingLimits.min) - 3,
+                            suggestedMax: Math.max(...dataPointsPlot, appleGlobalPendingLimits.max) + 3
+                        },
+                        x: {
+                            ticks: {
+                                font: { size: 9, weight: 'semibold' },
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+        });
+    };
+</script>
+
+</body>
+</html>
