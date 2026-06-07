@@ -60,7 +60,7 @@
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center bg-dark text-white p-3 rounded card mb-3">
         <div>
-            <h2 class="mb-0">Five Star Refrigeration Check System <span class="badge bg-success fs-6 align-middle ms-2">v1.3.6</span></h2>
+            <h2 class="mb-0">Five Star Refrigeration Check System <span class="badge bg-success fs-6 align-middle ms-2">v1.3.7</span></h2>
             <small>PWA + IndexedDB Draft Recovery Build</small>
         </div>
         <span class="badge bg-primary fs-6" id="liveClock"></span>
@@ -1099,6 +1099,168 @@
         }, 10000);
     }
 
+
+
+    function runStageOneValidation() {
+        let hasErrors = false;
+        let firstBadField = null;
+        let needsCorrectionReview = false;
+
+        const initialsNode = document.getElementById("initials");
+        const shiftNode = document.getElementById("shift");
+        const validateActionsBtn = document.getElementById("validateActionsBtn");
+        const finalSubmitBtn = document.getElementById("finalSubmitBtn");
+
+        if (!initialsNode.value.trim()) {
+            alert("Inspector initials are required before validation.");
+            initialsNode.focus();
+            return;
+        }
+
+        if (!shiftNode.value) {
+            alert("Please select a shift window before validation.");
+            shiftNode.focus();
+            return;
+        }
+
+        document.querySelectorAll(".dynamic-action-area").forEach(area => {
+            area.innerHTML = "";
+        });
+
+        document.querySelectorAll("input[data-sec]").forEach(input => {
+            input.classList.remove("field-error");
+
+            const rawValue = input.value.trim();
+            const parsedValue = parseFloat(rawValue);
+            const sectionId = input.getAttribute("data-sec");
+            const assetName = input.getAttribute("data-name");
+            const limits = limitsSchema[sectionId];
+
+            if (rawValue === "" || isNaN(parsedValue)) {
+                hasErrors = true;
+                input.classList.add("field-error");
+
+                if (!firstBadField) {
+                    firstBadField = input;
+                }
+
+                return;
+            }
+
+            const statusClass = determineStatusClass(parsedValue, limits);
+
+            if (statusClass === "status-red" || statusClass === "status-yellow") {
+                needsCorrectionReview = true;
+
+                const actionsArea = document.getElementById("actions-" + sectionId);
+                if (actionsArea) {
+                    const coolerKey = assetName.replace(/[^a-zA-Z0-9_-]/g, "_");
+                    const actionBlockId = "action-block-" + coolerKey;
+
+                    if (!document.getElementById(actionBlockId)) {
+                        actionsArea.innerHTML += `
+                            <div class="inline-action-box" id="${actionBlockId}">
+                                <div class="fw-bold text-danger mb-2">
+                                    Action required for ${assetName}: ${parsedValue}°F
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input action-checkbox-node"
+                                           type="checkbox"
+                                           data-cooler-key="${assetName}"
+                                           value="Manager notified"
+                                           onchange="saveActiveCheckboxesToMemory(); lockSubmissionOnChanges();">
+                                    <label class="form-check-label">Manager notified</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input action-checkbox-node"
+                                           type="checkbox"
+                                           data-cooler-key="${assetName}"
+                                           value="Product condition checked"
+                                           onchange="saveActiveCheckboxesToMemory(); lockSubmissionOnChanges();">
+                                    <label class="form-check-label">Product condition checked</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input action-checkbox-node"
+                                           type="checkbox"
+                                           data-cooler-key="${assetName}"
+                                           value="Recheck scheduled"
+                                           onchange="saveActiveCheckboxesToMemory(); lockSubmissionOnChanges();">
+                                    <label class="form-check-label">Recheck scheduled</label>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+            }
+        });
+
+        if (hasErrors) {
+            alert("Please complete all temperature fields before continuing.");
+            if (firstBadField) {
+                firstBadField.focus();
+                firstBadField.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+            return;
+        }
+
+        if (needsCorrectionReview) {
+            validateActionsBtn.style.display = "block";
+            finalSubmitBtn.disabled = true;
+            finalSubmitBtn.classList.remove("btn-success");
+            finalSubmitBtn.classList.add("btn-secondary");
+
+            alert("Validation found yellow/red readings. Please verify the correction checklist, then press Step 2.");
+            return;
+        }
+
+        validateActionsBtn.style.display = "none";
+        finalSubmitBtn.disabled = false;
+        finalSubmitBtn.classList.remove("btn-secondary");
+        finalSubmitBtn.classList.add("btn-success");
+
+        forceSaveDraftNow();
+        backupDraftToCloud();
+
+        alert("Validation passed. You may now submit the log.");
+    }
+
+    function runStageTwoValidation() {
+        let missingActions = false;
+        let firstMissingBox = null;
+
+        const finalSubmitBtn = document.getElementById("finalSubmitBtn");
+
+        document.querySelectorAll(".inline-action-box").forEach(box => {
+            const checked = box.querySelectorAll(".action-checkbox-node:checked").length > 0;
+
+            if (!checked) {
+                missingActions = true;
+                box.classList.add("field-error");
+
+                if (!firstMissingBox) {
+                    firstMissingBox = box;
+                }
+            } else {
+                box.classList.remove("field-error");
+            }
+        });
+
+        if (missingActions) {
+            alert("Please check at least one corrective action for each yellow/red reading.");
+            if (firstMissingBox) {
+                firstMissingBox.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+            return;
+        }
+
+        saveActiveCheckboxesToMemory();
+
+        finalSubmitBtn.disabled = false;
+        finalSubmitBtn.classList.remove("btn-secondary");
+        finalSubmitBtn.classList.add("btn-success");
+
+        alert("Corrections verified. You may now submit the log.");
+    }
 
 
     function registerServiceWorker() {
