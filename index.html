@@ -60,8 +60,8 @@
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center bg-dark text-white p-3 rounded card mb-3">
         <div>
-            <h2 class="mb-0">Five Star Refrigeration Check System <span class="badge bg-success fs-6 align-middle ms-2">v1.3.7</span></h2>
-            <small>PWA + IndexedDB Draft Recovery Build</small>
+            <h2 class="mb-0">Five Star Refrigeration Check System <span class="badge bg-success fs-6 align-middle ms-2">v1.3.8</span></h2>
+            <small>PWA + IndexedDB Draft Recovery + Corrective Actions Build</small>
         </div>
         <span class="badge bg-primary fs-6" id="liveClock"></span>
     </div>
@@ -344,6 +344,7 @@
             inputElement.classList.add(determineStatusClass(value, limitsSchema[sectionId]));
         }
 
+        renderCorrectiveActionPanels();
         forceSaveDraftNow();
         lockSubmissionOnChanges();
     }
@@ -824,6 +825,250 @@
         }
     }
 
+
+    const correctiveActionOptions = [
+        "📦 Moved Product to Cooler",
+        "❄️ Moved Product to Freezer",
+        "🛠️ Turned off to allow Defrost",
+        "📞 Scheduled Service Call",
+        "🚨 Scheduled Emergency Service",
+        "📋 Notified Management Team",
+        "🎛️ Checked Rack for Alarms see notes",
+        "⏳ Rechecking in 1 Hour"
+    ];
+
+    function escapeHtml(value) {
+        return String(value || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function collectCheckboxStateSilently() {
+        document.querySelectorAll('.action-checkbox-node').forEach(cb => {
+            const coolerKey = cb.getAttribute('data-cooler-key');
+            const val = cb.value;
+
+            if (!runtimeCheckboxStateMemory[coolerKey]) {
+                runtimeCheckboxStateMemory[coolerKey] = {};
+            }
+
+            runtimeCheckboxStateMemory[coolerKey][val] = cb.checked;
+        });
+    }
+
+    function getCorrectiveStatusForInput(input) {
+        const value = parseFloat(input.value);
+        const sectionId = input.getAttribute('data-sec');
+
+        if (input.value.trim() === "" || isNaN(value)) {
+            return "empty";
+        }
+
+        return determineStatusClass(value, limitsSchema[sectionId]);
+    }
+
+    function getSelectedCorrectiveActionsForCooler(coolerName) {
+        const stored = runtimeCheckboxStateMemory[coolerName] || {};
+        return Object.keys(stored).filter(key => stored[key]);
+    }
+
+    function getActionTakenForInput(input) {
+        const coolerName = input.getAttribute('data-name');
+        const statusClass = getCorrectiveStatusForInput(input);
+
+        if (statusClass === "status-red") {
+            const selected = getSelectedCorrectiveActionsForCooler(coolerName);
+            return selected.length > 0 ? selected.join(" | ") : "Critical Alert - No Corrective Action Selected";
+        }
+
+        if (statusClass === "status-yellow") {
+            return "Rechecking in 1 Hour (Enforced Compliance)";
+        }
+
+        return "None Required";
+    }
+
+    function getCurrentAlertSummary() {
+        const summary = {
+            red: [],
+            yellow: [],
+            firstProblemField: null
+        };
+
+        document.querySelectorAll('input[data-sec]').forEach(input => {
+            const statusClass = getCorrectiveStatusForInput(input);
+            const value = parseFloat(input.value);
+            const item = {
+                input,
+                sectionId: input.getAttribute('data-sec'),
+                coolerName: input.getAttribute('data-name'),
+                value: isNaN(value) ? "" : value
+            };
+
+            if (statusClass === "status-red") {
+                summary.red.push(item);
+                if (!summary.firstProblemField) summary.firstProblemField = input;
+            } else if (statusClass === "status-yellow") {
+                summary.yellow.push(item);
+            }
+        });
+
+        return summary;
+    }
+
+    function renderCorrectiveActionPanels() {
+        collectCheckboxStateSilently();
+
+        document.querySelectorAll('.dynamic-action-area').forEach(area => {
+            area.innerHTML = "";
+        });
+
+        const summary = getCurrentAlertSummary();
+        const grouped = {};
+
+        summary.yellow.forEach(item => {
+            if (!grouped[item.sectionId]) grouped[item.sectionId] = { yellow: [], red: [] };
+            grouped[item.sectionId].yellow.push(item);
+        });
+
+        summary.red.forEach(item => {
+            if (!grouped[item.sectionId]) grouped[item.sectionId] = { yellow: [], red: [] };
+            grouped[item.sectionId].red.push(item);
+        });
+
+        Object.keys(grouped).forEach(sectionId => {
+            const actionArea = document.getElementById(`actions-${sectionId}`);
+            if (!actionArea) return;
+
+            let html = "";
+
+            grouped[sectionId].yellow.forEach(item => {
+                html += `<div class="alert alert-warning py-2 mb-2">
+                    <strong>🟡 Caution:</strong> ${escapeHtml(item.coolerName)} logged ${escapeHtml(item.value)}°F.<br>
+                    <span class="fw-semibold">Automatic action:</span> Rechecking in 1 Hour (Enforced Compliance)
+                </div>`;
+            });
+
+            grouped[sectionId].red.forEach(item => {
+                const stored = runtimeCheckboxStateMemory[item.coolerName] || {};
+                html += `<div class="inline-action-box critical-action-box" data-cooler-key="${escapeHtml(item.coolerName)}">
+                    <div class="fw-bold text-danger mb-2">🔴 Critical Alert: ${escapeHtml(item.coolerName)} logged ${escapeHtml(item.value)}°F</div>
+                    <div class="small text-muted mb-2">Select at least one corrective action before final submission.</div>`;
+
+                correctiveActionOptions.forEach(option => {
+                    const checked = stored[option] ? "checked" : "";
+                    const idSafe = "cb_" + btoa(unescape(encodeURIComponent(item.coolerName + option))).replace(/[^a-zA-Z0-9]/g, "");
+                    html += `<div class="form-check mb-1">
+                        <input class="form-check-input action-checkbox-node" type="checkbox" id="${idSafe}" data-cooler-key="${escapeHtml(item.coolerName)}" value="${escapeHtml(option)}" ${checked}>
+                        <label class="form-check-label" for="${idSafe}">${escapeHtml(option)}</label>
+                    </div>`;
+                });
+
+                html += `</div>`;
+            });
+
+            actionArea.innerHTML = html;
+        });
+
+        document.querySelectorAll('.action-checkbox-node').forEach(cb => {
+            cb.addEventListener('change', function() {
+                collectCheckboxStateSilently();
+                forceSaveDraftNow();
+                lockSubmissionOnChanges();
+            });
+        });
+
+        return summary;
+    }
+
+    function runStageOneValidation() {
+        renderCorrectiveActionPanels();
+
+        const initialsNode = document.getElementById("initials");
+        const shiftNode = document.getElementById("shift");
+        const finalSubmitBtn = document.getElementById("finalSubmitBtn");
+        const validateActionsBtn = document.getElementById("validateActionsBtn");
+
+        if (!initialsNode.value.trim()) {
+            alert("Inspector initials are required before validation.");
+            initialsNode.focus();
+            return;
+        }
+
+        if (!shiftNode.value) {
+            alert("Shift window is required before validation.");
+            shiftNode.focus();
+            return;
+        }
+
+        let firstMissingField = null;
+        document.querySelectorAll('input[data-sec]').forEach(input => {
+            input.classList.remove('field-error');
+            const value = parseFloat(input.value);
+
+            if (input.value.trim() === "" || isNaN(value)) {
+                input.classList.add('field-error');
+                if (!firstMissingField) firstMissingField = input;
+            }
+        });
+
+        if (firstMissingField) {
+            alert("Please complete every temperature field before continuing.");
+            firstMissingField.focus();
+            firstMissingField.scrollIntoView({ behavior: "smooth", block: "center" });
+            return;
+        }
+
+        const summary = renderCorrectiveActionPanels();
+
+        if (summary.red.length > 0) {
+            finalSubmitBtn.disabled = true;
+            finalSubmitBtn.classList.remove('btn-success');
+            finalSubmitBtn.classList.add('btn-secondary');
+            validateActionsBtn.style.display = "block";
+
+            alert(`🔴 ${summary.red.length} critical alert(s) require corrective action before submission.`);
+            if (summary.firstProblemField) {
+                summary.firstProblemField.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+            return;
+        }
+
+        validateActionsBtn.style.display = "none";
+        finalSubmitBtn.disabled = false;
+        finalSubmitBtn.classList.remove('btn-secondary');
+        finalSubmitBtn.classList.add('btn-success');
+        alert("✅ Validation passed. No critical corrective actions are required. You may submit the log.");
+    }
+
+    function runStageTwoValidation() {
+        const summary = renderCorrectiveActionPanels();
+        let missingAction = null;
+
+        summary.red.forEach(item => {
+            const selected = getSelectedCorrectiveActionsForCooler(item.coolerName);
+            if (selected.length === 0 && !missingAction) {
+                missingAction = item;
+            }
+        });
+
+        if (missingAction) {
+            alert(`Corrective action is required for ${missingAction.coolerName}. Select at least one action before submitting.`);
+            missingAction.input.scrollIntoView({ behavior: "smooth", block: "center" });
+            return;
+        }
+
+        document.getElementById('validateActionsBtn').style.display = "none";
+        const finalSubmitBtn = document.getElementById('finalSubmitBtn');
+        finalSubmitBtn.disabled = false;
+        finalSubmitBtn.classList.remove('btn-secondary');
+        finalSubmitBtn.classList.add('btn-success');
+        alert("✅ Corrective actions verified. You may now submit the log.");
+    }
+
     function saveActiveCheckboxesToMemory() {
         document.querySelectorAll('.action-checkbox-node').forEach(cb => {
             const coolerKey = cb.getAttribute('data-cooler-key');
@@ -978,6 +1223,16 @@
         saveActiveCheckboxesToMemory();
         forceSaveDraftNow();
 
+        const summary = renderCorrectiveActionPanels();
+        const unresolvedCritical = summary.red.find(item => getSelectedCorrectiveActionsForCooler(item.coolerName).length === 0);
+        if (unresolvedCritical) {
+            alert(`Corrective action is required for ${unresolvedCritical.coolerName} before submitting.`);
+            unresolvedCritical.input.scrollIntoView({ behavior: "smooth", block: "center" });
+            document.getElementById('finalSubmitBtn').disabled = true;
+            document.getElementById('validateActionsBtn').style.display = "block";
+            return;
+        }
+
         const submitBtn = document.getElementById('finalSubmitBtn');
         submitBtn.disabled = true;
         submitBtn.innerText = "⏳ Synchronizing Log Stream...";
@@ -986,10 +1241,12 @@
         let sharedNotes = document.getElementById('freehandNotes').value.trim() || "None Logged";
 
         document.querySelectorAll('input[data-sec]').forEach(input => {
+            const sectionId = input.getAttribute('data-sec');
             package.push({
+                department: limitsSchema[sectionId] ? limitsSchema[sectionId].title : sectionId,
                 cooler_name: input.getAttribute('data-name'),
                 temperature: parseFloat(input.value),
-                action_taken: "Logged Status Passed"
+                action_taken: getActionTakenForInput(input)
             });
         });
 
@@ -1099,168 +1356,6 @@
         }, 10000);
     }
 
-
-
-    function runStageOneValidation() {
-        let hasErrors = false;
-        let firstBadField = null;
-        let needsCorrectionReview = false;
-
-        const initialsNode = document.getElementById("initials");
-        const shiftNode = document.getElementById("shift");
-        const validateActionsBtn = document.getElementById("validateActionsBtn");
-        const finalSubmitBtn = document.getElementById("finalSubmitBtn");
-
-        if (!initialsNode.value.trim()) {
-            alert("Inspector initials are required before validation.");
-            initialsNode.focus();
-            return;
-        }
-
-        if (!shiftNode.value) {
-            alert("Please select a shift window before validation.");
-            shiftNode.focus();
-            return;
-        }
-
-        document.querySelectorAll(".dynamic-action-area").forEach(area => {
-            area.innerHTML = "";
-        });
-
-        document.querySelectorAll("input[data-sec]").forEach(input => {
-            input.classList.remove("field-error");
-
-            const rawValue = input.value.trim();
-            const parsedValue = parseFloat(rawValue);
-            const sectionId = input.getAttribute("data-sec");
-            const assetName = input.getAttribute("data-name");
-            const limits = limitsSchema[sectionId];
-
-            if (rawValue === "" || isNaN(parsedValue)) {
-                hasErrors = true;
-                input.classList.add("field-error");
-
-                if (!firstBadField) {
-                    firstBadField = input;
-                }
-
-                return;
-            }
-
-            const statusClass = determineStatusClass(parsedValue, limits);
-
-            if (statusClass === "status-red" || statusClass === "status-yellow") {
-                needsCorrectionReview = true;
-
-                const actionsArea = document.getElementById("actions-" + sectionId);
-                if (actionsArea) {
-                    const coolerKey = assetName.replace(/[^a-zA-Z0-9_-]/g, "_");
-                    const actionBlockId = "action-block-" + coolerKey;
-
-                    if (!document.getElementById(actionBlockId)) {
-                        actionsArea.innerHTML += `
-                            <div class="inline-action-box" id="${actionBlockId}">
-                                <div class="fw-bold text-danger mb-2">
-                                    Action required for ${assetName}: ${parsedValue}°F
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input action-checkbox-node"
-                                           type="checkbox"
-                                           data-cooler-key="${assetName}"
-                                           value="Manager notified"
-                                           onchange="saveActiveCheckboxesToMemory(); lockSubmissionOnChanges();">
-                                    <label class="form-check-label">Manager notified</label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input action-checkbox-node"
-                                           type="checkbox"
-                                           data-cooler-key="${assetName}"
-                                           value="Product condition checked"
-                                           onchange="saveActiveCheckboxesToMemory(); lockSubmissionOnChanges();">
-                                    <label class="form-check-label">Product condition checked</label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input action-checkbox-node"
-                                           type="checkbox"
-                                           data-cooler-key="${assetName}"
-                                           value="Recheck scheduled"
-                                           onchange="saveActiveCheckboxesToMemory(); lockSubmissionOnChanges();">
-                                    <label class="form-check-label">Recheck scheduled</label>
-                                </div>
-                            </div>
-                        `;
-                    }
-                }
-            }
-        });
-
-        if (hasErrors) {
-            alert("Please complete all temperature fields before continuing.");
-            if (firstBadField) {
-                firstBadField.focus();
-                firstBadField.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
-            return;
-        }
-
-        if (needsCorrectionReview) {
-            validateActionsBtn.style.display = "block";
-            finalSubmitBtn.disabled = true;
-            finalSubmitBtn.classList.remove("btn-success");
-            finalSubmitBtn.classList.add("btn-secondary");
-
-            alert("Validation found yellow/red readings. Please verify the correction checklist, then press Step 2.");
-            return;
-        }
-
-        validateActionsBtn.style.display = "none";
-        finalSubmitBtn.disabled = false;
-        finalSubmitBtn.classList.remove("btn-secondary");
-        finalSubmitBtn.classList.add("btn-success");
-
-        forceSaveDraftNow();
-        backupDraftToCloud();
-
-        alert("Validation passed. You may now submit the log.");
-    }
-
-    function runStageTwoValidation() {
-        let missingActions = false;
-        let firstMissingBox = null;
-
-        const finalSubmitBtn = document.getElementById("finalSubmitBtn");
-
-        document.querySelectorAll(".inline-action-box").forEach(box => {
-            const checked = box.querySelectorAll(".action-checkbox-node:checked").length > 0;
-
-            if (!checked) {
-                missingActions = true;
-                box.classList.add("field-error");
-
-                if (!firstMissingBox) {
-                    firstMissingBox = box;
-                }
-            } else {
-                box.classList.remove("field-error");
-            }
-        });
-
-        if (missingActions) {
-            alert("Please check at least one corrective action for each yellow/red reading.");
-            if (firstMissingBox) {
-                firstMissingBox.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
-            return;
-        }
-
-        saveActiveCheckboxesToMemory();
-
-        finalSubmitBtn.disabled = false;
-        finalSubmitBtn.classList.remove("btn-secondary");
-        finalSubmitBtn.classList.add("btn-success");
-
-        alert("Corrections verified. You may now submit the log.");
-    }
 
 
     function registerServiceWorker() {
